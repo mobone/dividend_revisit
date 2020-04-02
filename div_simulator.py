@@ -30,6 +30,7 @@ def run_simulation(cutoff, end_cutoff, num_trades):
             try:
 
                 num_shares = int( balance_to_use / float(trade['start_price']) )
+
                 #print(num_shares)
 
 
