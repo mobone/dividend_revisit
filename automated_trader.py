@@ -23,7 +23,7 @@ import warnings
 
 warnings.simplefilter('ignore')
 
-conn = sqlite3.connect('dividends.db')
+
 
 
 
@@ -31,9 +31,12 @@ logging.basicConfig(format='%(asctime)s %(message)s')
 logging.basicConfig(filename='./trader.log', level=logging.INFO)
 
 class automated_trader():
-    def __init__(self):
+    def __init__(self, mode):
 
         logging.info('started automated trader')
+
+        self.conn = sqlite3.connect('dividends.db')
+        self.cur = self.conn.cursor()
 
         self.api = tradeapi.REST(
                                 'PKU23YDAWZVS4PUESHQ6',
@@ -47,8 +50,13 @@ class automated_trader():
         self.driver = webdriver.Chrome(options=chrome_options, executable_path='./chromedriver.exe')
         self.delay = 10
 
-        self.get_dividend_plays()
-        self.make_new_trades()
+        
+
+        if mode == 'buy':
+            self.get_dividend_plays()
+            self.make_new_trades()
+        elif mode == 'sell':
+            self.close_trades()
 
     def get_dividend_plays(self):
         
@@ -60,22 +68,15 @@ class automated_trader():
                 WebDriverWait(self.driver, self.delay).until(EC.presence_of_element_located((By.PARTIAL_LINK_TEXT, 'Next ')))
                 next_element = self.driver.find_element_by_link_text("Next ›")
 
-                
-                
-
                 dividend_page_df = pd.read_html(self.driver.page_source)[0]
                 #print(dividend_page_df)
 
                 dividend_dfs.append(dividend_page_df)
-                
-        
 
                 next_element.click()
             except Exception as e:
                 #print(e)
                 break
-                
-
 
         dividends = pd.concat(dividend_dfs)
         
@@ -115,8 +116,10 @@ class automated_trader():
         for symbol, dividend_row in self.dividends.iterrows():
             symbol = symbol.split('-')[0]
             
-            price = dividend_row['Stock Price']*1.1
-            order_queue.append( (symbol, 'buy', price) )
+            #price = dividend_row['Stock Price']*1.1
+            #order_queue.append( (symbol, 'buy', price) )
+            order_queue.append( (symbol, 'buy') )
+
             #order_status, fill_price, order_id = self.submit_order(symbol, 'buy', price)
         
         t_pool = ThreadPool(5)
@@ -124,12 +127,12 @@ class automated_trader():
         
         
         for order_result in orders:
-            order_status, fill_price, order_id, symbol = order_result
+            order_status, buy_fill_price, order_id, symbol = order_result
         
             dividend_row = self.dividends.loc[symbol]
             dividend_row['buy_date'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             dividend_row['buy_order_status'] = order_status
-            dividend_row['buy_fill_price'] = fill_price
+            dividend_row['buy_fill_price'] = buy_fill_price
             dividend_row['buy_order_id'] = order_id
             
             dividend_row['sell_date'] = None
@@ -144,11 +147,55 @@ class automated_trader():
             for col_name in dividend_row.columns:
                 dividend_row[col_name] = dividend_row[col_name].apply(pd.to_numeric, errors='ignore')
             
-            dividend_row.to_sql('trades', conn, if_exists='append')
+            dividend_row.to_sql('trades', self.conn, if_exists='append')
+        
+    def close_trades(self):
+        sql = 'select * from trades where buy_order_status == "filled" and sell_order_status is null'
+        trades_df = pd.read_sql(sql, self.conn)
+
+        order_queue = []
+        for symbol, trade_row in trades_df.iterrows():
+            order_queue.append( (symbol, 'sell') )
+
+        #t_pool = ThreadPool(5)
+        #orders = t_pool.map(submit_order, order_queue)
+        
+        orders = submit_order(order_queue[0])
+        orders = [orders]
         
 
+        for order_result in orders:
+            order_status, sell_fill_price, order_id, symbol = order_result
+
+            sell_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            #get roi
+            buy_price = float(trades_df.loc[symbol]['buy_fill_price'])
+            roi = (sell_fill_price - buy_price) / buy_price
+
+            sql = '''update trades set sell_date = "%s", 
+                                       sell_order_status = "%s", 
+                                       sell_fill_price = %s, 
+                                       sell_order_id = "%s",
+                                       stock_roi = %s 
+                     where unique_id == "%s"
+                '''
+            sql = sql % ( sell_date, order_status, sell_fill_price, order_id, roi )
+            print('submitting close order sql')
+            print(sql)
+
+            self.cur.execute(sql)
+            self.conn.commit()
+
+            
+                              
+
+
+
+
     def submit_order(self, params):
-        symbol, side, limit_price = params
+        #symbol, side, limit_price = params
+        symbol, side = params
         order_status = None
         fill_price = None
         order_id = None
@@ -157,20 +204,22 @@ class automated_trader():
                                     symbol=symbol, 
                                     qty = 1, 
                                     side = side, 
-                                    type = 'limit', 
+                                    type = 'market', 
                                     time_in_force = 'day',
-                                    extended_hours = True,
-                                    limit_price = float(round(limit_price, 2))
+                                    #extended_hours = True,
+                                    #limit_price = float(round(limit_price, 2))
                                     )
-            print('order submitted', symbol, side, limit_price, order.id)
+            #print('order submitted', symbol, side, limit_price, order.id)
+            print('order submitted', symbol, side, order.id)
             order_id = order.id
-            for _ in range(10):
+            for _ in range(60):
                 sleep(1)
                 order = self.api.get_order(order.id)
                 order_status = order.status
                 
                 if order.status == 'filled':
-                    print('order filled', symbol, side, limit_price, order.id)
+                    #print('order filled', symbol, side, limit_price, order.id)
+                    print('order filled', symbol, side, order.id)
                     fill_price = float(order.filled_avg_price)
                     
                     break
@@ -187,4 +236,10 @@ class automated_trader():
         return order_status, fill_price, order_id, symbol
 
 
-automated_trader()
+if __name__ == '__main__':
+    mode = sys.argv[1]
+    if mode == 'buy' or mode == 'sell':
+        automated_trader(mode)
+    else:
+        print('correct mode argument not provided')
+
