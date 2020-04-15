@@ -157,9 +157,6 @@ class automated_trader():
 
         #t_pool = ThreadPool(5)
         #orders = t_pool.map(submit_order, order_queue)
-        
-        
-        
 
         for order_result in orders:
             order_status, sell_fill_price, order_id, symbol = order_result
