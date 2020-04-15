@@ -149,11 +149,16 @@ class automated_trader():
         for symbol, trade_row in trades_df.iterrows():
             order_queue.append( (symbol, 'sell') )
 
+
+        # TODO: replace this one individual call of the order queue with the threading call
+        # for the entire order_queue
+        orders = submit_order(order_queue[0])
+        orders = [orders]
+
         #t_pool = ThreadPool(5)
         #orders = t_pool.map(submit_order, order_queue)
         
-        orders = submit_order(order_queue[0])
-        orders = [orders]
+        
         
 
         for order_result in orders:
