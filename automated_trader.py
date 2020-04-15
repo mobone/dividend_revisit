@@ -1,5 +1,4 @@
 
-
 import alpaca_trade_api as tradeapi
 from math import floor
 import logging
@@ -13,8 +12,6 @@ from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import TimeoutException
-from selenium.webdriver.firefox.firefox_binary import FirefoxBinary
 from selenium.webdriver.chrome.options import Options
 from multiprocessing.pool import ThreadPool
 
@@ -22,10 +19,6 @@ import sqlite3
 import warnings
 
 warnings.simplefilter('ignore')
-
-
-
-
 
 logging.basicConfig(format='%(asctime)s %(message)s')
 logging.basicConfig(filename='./trader.log', level=logging.INFO)
@@ -50,13 +43,12 @@ class automated_trader():
         self.driver = webdriver.Chrome(options=chrome_options, executable_path='./chromedriver.exe')
         self.delay = 10
 
-        
-
         if mode == 'buy':
             self.get_dividend_plays()
             self.make_new_trades()
         elif mode == 'sell':
             self.close_trades()
+
 
     def get_dividend_plays(self):
         
@@ -84,12 +76,11 @@ class automated_trader():
         del dividends['DARS™ Rating']
         
         for col_name in ['Yield', 'Stock Price', 'Div Payout']:
-        
-
             dividends[col_name] = dividends[col_name].str.replace(',', '')
             dividends[col_name] = dividends[col_name].str.replace('$', '')
             dividends[col_name] = dividends[col_name].str.replace('%', '')
             dividends[col_name] = dividends[col_name].astype(float)
+
         dividends['Yield'] = dividends['Yield'] / 100
 
         #dividends['Ex-Div Date'] = pd.to_datetime(dividends['Ex-Div Date'])
@@ -148,7 +139,8 @@ class automated_trader():
                 dividend_row[col_name] = dividend_row[col_name].apply(pd.to_numeric, errors='ignore')
             
             dividend_row.to_sql('trades', self.conn, if_exists='append')
-        
+
+
     def close_trades(self):
         sql = 'select * from trades where buy_order_status == "filled" and sell_order_status is null'
         trades_df = pd.read_sql(sql, self.conn)
@@ -186,11 +178,6 @@ class automated_trader():
 
             self.cur.execute(sql)
             self.conn.commit()
-
-            
-                              
-
-
 
 
     def submit_order(self, params):
